@@ -53,16 +53,6 @@ const (
 	SnapshotBlockSize = 10000
 )
 
-var (
-	addressPrefix                       = []byte("a")
-	identityPrefix                      = []byte("i")
-	globalKey                           = []byte("global")
-	statusSwitchKey                     = []byte("status-switch")
-	currentStateDbPrefixKey             = []byte("statedb-prefix")
-	currentIdentityStateDbPrefixKey     = []byte("id-statedb-prefix")
-	preliminaryIdentityStateDbPrefixKey = []byte("pre-id-statedb-prefix")
-)
-
 type StateDB struct {
 	original dbm.DB
 	db       dbm.DB
@@ -84,7 +74,7 @@ type StateDB struct {
 }
 
 func NewLazy(db dbm.DB) *StateDB {
-	pdb := dbm.NewPrefixDB(db, loadPrefix(db))
+	pdb := dbm.NewPrefixDB(db, StateDbKeys.LoadDbPrefix(db))
 	tree := NewMutableTreeWithOpts(pdb, dbm.NewMemDB(), DefaultTreeKeepEvery, DefaultTreeKeepRecent)
 	return &StateDB{
 		original:           db,
@@ -517,7 +507,7 @@ func (s *StateDB) updateStateAccountObject(stateObject *stateAccount) {
 		panic(fmt.Errorf("can't encode account object at %x: %v", addr[:], err))
 	}
 
-	s.tree.Set(append(addressPrefix, addr[:]...), data)
+	s.tree.Set(StateDbKeys.AddressKey(addr), data)
 }
 
 // updateStateAccountObject writes the given object to the trie.
@@ -528,7 +518,7 @@ func (s *StateDB) updateStateIdentityObject(stateObject *stateIdentity) {
 		panic(fmt.Errorf("can't encode identity object at %x: %v", addr[:], err))
 	}
 
-	s.tree.Set(append(identityPrefix, addr[:]...), data)
+	s.tree.Set(StateDbKeys.IdentityKey(addr), data)
 }
 
 // updateStateAccountObject writes the given object to the trie.
@@ -538,7 +528,7 @@ func (s *StateDB) updateStateGlobalObject(stateObject *stateGlobal) {
 		panic(fmt.Errorf("can't encode global object, %v", err))
 	}
 
-	s.tree.Set(globalKey, data)
+	s.tree.Set(StateDbKeys.GlobalKey(), data)
 }
 
 // updateStateAccountObject writes the given object to the trie.
@@ -548,7 +538,7 @@ func (s *StateDB) updateStateStatusSwitchObject(stateObject *stateStatusSwitch) 
 		panic(fmt.Errorf("can't encode status switch object, %v", err))
 	}
 
-	s.tree.Set(statusSwitchKey, data)
+	s.tree.Set(StateDbKeys.StatusSwitchKey(), data)
 }
 
 // deleteStateAccountObject removes the given object from the state trie.
@@ -556,7 +546,7 @@ func (s *StateDB) deleteStateAccountObject(stateObject *stateAccount) {
 	stateObject.deleted = true
 	addr := stateObject.Address()
 
-	s.tree.Remove(append(addressPrefix, addr[:]...))
+	s.tree.Remove(StateDbKeys.AddressKey(addr))
 }
 
 // deleteStateAccountObject removes the given object from the state trie.
@@ -564,13 +554,13 @@ func (s *StateDB) deleteStateIdentityObject(stateObject *stateIdentity) {
 	stateObject.deleted = true
 	addr := stateObject.Address()
 
-	s.tree.Remove(append(identityPrefix, addr[:]...))
+	s.tree.Remove(StateDbKeys.IdentityKey(addr))
 }
 
 func (s *StateDB) deleteStateStatusSwitchObject(stateObject *stateStatusSwitch) {
 	stateObject.deleted = true
 
-	s.tree.Remove(statusSwitchKey)
+	s.tree.Remove(StateDbKeys.StatusSwitchKey())
 }
 
 // Retrieve a state account given my the address. Returns nil if not found.
@@ -586,7 +576,7 @@ func (s *StateDB) getStateAccount(addr common.Address) (stateObject *stateAccoun
 	}
 	s.lock.Unlock()
 	// Load the object from the database.
-	_, enc := s.tree.Get(append(addressPrefix, addr[:]...))
+	_, enc := s.tree.Get(StateDbKeys.AddressKey(addr))
 	if len(enc) == 0 {
 		return nil
 	}
@@ -615,7 +605,7 @@ func (s *StateDB) getStateIdentity(addr common.Address) (stateObject *stateIdent
 	s.lock.Unlock()
 
 	// Load the object from the database.
-	_, enc := s.tree.Get(append(identityPrefix, addr[:]...))
+	_, enc := s.tree.Get(StateDbKeys.IdentityKey(addr))
 	if len(enc) == 0 {
 		return nil
 	}
@@ -638,7 +628,7 @@ func (s *StateDB) getStateGlobal() (stateObject *stateGlobal) {
 	}
 
 	// Load the object from the database.
-	_, enc := s.tree.Get(globalKey)
+	_, enc := s.tree.Get(StateDbKeys.GlobalKey())
 	if len(enc) == 0 {
 		return nil
 	}
@@ -663,7 +653,7 @@ func (s *StateDB) getStateStatusSwitch() (stateObject *stateStatusSwitch) {
 	}
 
 	// Load the object from the database.
-	_, enc := s.tree.Get(statusSwitchKey)
+	_, enc := s.tree.Get(StateDbKeys.StatusSwitchKey())
 	if len(enc) == 0 {
 		return nil
 	}
@@ -906,14 +896,14 @@ func (s *StateDB) Root() common.Hash {
 }
 
 func (s *StateDB) IterateIdentities(fn func(key []byte, value []byte) bool) bool {
-	start := append(identityPrefix, common.MinAddr...)
-	end := append(identityPrefix, common.MaxAddr...)
+	start := StateDbKeys.IdentityKey(common.MinAddr)
+	end := StateDbKeys.IdentityKey(common.MaxAddr)
 	return s.tree.GetImmutable().IterateRange(start, end, true, fn)
 }
 
 func (s *StateDB) IterateAccounts(fn func(key []byte, value []byte) bool) bool {
-	start := append(addressPrefix, common.MinAddr...)
-	end := append(addressPrefix, common.MaxAddr...)
+	start := StateDbKeys.AddressKey(common.MinAddr)
+	end := StateDbKeys.AddressKey(common.MaxAddr)
 	return s.tree.GetImmutable().IterateRange(start, end, true, fn)
 }
 
@@ -1019,28 +1009,6 @@ func (s *StateDB) IterateOverAccounts(callback func(addr common.Address, account
 	})
 }
 
-func loadPrefix(db dbm.DB) []byte {
-	p, _ := db.Get(currentStateDbPrefixKey)
-	if p == nil {
-		p = prefix(0)
-		b := db.NewBatch()
-		setPrefix(b, p)
-		if err := b.WriteSync(); err != nil {
-			panic(err)
-		}
-		return p
-	}
-	return p
-}
-
-func setPrefix(b dbm.Batch, prefix []byte) {
-	b.Set(currentStateDbPrefixKey, prefix)
-}
-
-func prefix(height uint64) []byte {
-	return []byte("st-" + strconv.FormatUint(height, 16))
-}
-
 func (s *StateDB) WriteSnapshot(height uint64, to io.Writer) (root common.Hash, err error) {
 	db := database.NewBackedMemDb(s.db)
 	tree := NewMutableTree(db)
@@ -1104,7 +1072,7 @@ func (s *StateDB) WriteSnapshot(height uint64, to io.Writer) (root common.Hash, 
 }
 
 func (s *StateDB) RecoverSnapshot(manifest *snapshot.Manifest, from io.Reader) error {
-	pdb := dbm.NewPrefixDB(s.original, prefix(manifest.Height))
+	pdb := dbm.NewPrefixDB(s.original, StateDbKeys.BuildDbPrefix(manifest.Height))
 
 	tar := archiver.Tar{
 		MkdirAll:               true,
@@ -1149,9 +1117,9 @@ func (s *StateDB) RecoverSnapshot(manifest *snapshot.Manifest, from io.Reader) e
 }
 
 func (s *StateDB) CommitSnapshot(manifest *snapshot.Manifest, batch dbm.Batch) (dropDb dbm.DB) {
-	pdb := dbm.NewPrefixDB(s.original, prefix(manifest.Height))
+	pdb := dbm.NewPrefixDB(s.original, StateDbKeys.BuildDbPrefix(manifest.Height))
 
-	setPrefix(batch, prefix(manifest.Height))
+	StateDbKeys.SaveDbPrefix(batch, StateDbKeys.BuildDbPrefix(manifest.Height))
 	dropDb = s.db
 
 	s.db = pdb
@@ -1165,7 +1133,7 @@ func (s *StateDB) CommitSnapshot(manifest *snapshot.Manifest, batch dbm.Batch) (
 }
 
 func (s *StateDB) DropSnapshot(manifest *snapshot.Manifest) {
-	pdb := dbm.NewPrefixDB(s.original, prefix(manifest.Height))
+	pdb := dbm.NewPrefixDB(s.original, StateDbKeys.BuildDbPrefix(manifest.Height))
 	common.ClearDb(pdb)
 }
 
@@ -1280,6 +1248,39 @@ func (s *StateDB) ClearStatusSwitchAddresses() {
 func (s *StateDB) ToggleStatusSwitchAddress(sender common.Address) {
 	statusSwitch := s.GetOrNewStatusSwitchObject()
 	statusSwitch.ToggleAddress(sender)
+}
+
+func (s *StateDB) SetContractValue(addr common.Address, key []byte, value []byte) {
+	s.tree.Set(StateDbKeys.ContractStoreKey(addr, key), value)
+}
+
+func (s *StateDB) GetContractValue(addr common.Address, key []byte) []byte {
+	_, value := s.tree.Get(StateDbKeys.ContractStoreKey(addr, key))
+	return value
+}
+
+func (s *StateDB) RemoveContractValue(addr common.Address, key []byte) {
+	s.tree.Remove(StateDbKeys.ContractStoreKey(addr, key))
+}
+
+func (s *StateDB) IterateContractStore(addr common.Address, minKey []byte, maxKey []byte, f func(key []byte, value []byte) bool) {
+	s.tree.GetImmutable().IterateRange(StateDbKeys.ContractStoreKey(addr, minKey), StateDbKeys.ContractStoreKey(addr, maxKey), true,
+		func(key []byte, value []byte) (stopped bool) {
+			return f(key[21:], value)
+		})
+}
+
+func (s *StateDB) DeployContract(addr common.Address, codeHash common.Hash) {
+	contract := s.GetOrNewAccountObject(addr)
+	contract.SetCodeHash(codeHash)
+}
+
+func (s *StateDB) GetCodeHash(addr common.Address) *common.Hash {
+	stateObject := s.getStateAccount(addr)
+	if stateObject != nil {
+		return stateObject.data.CodeHash
+	}
+	return nil
 }
 
 type readCloser struct {
