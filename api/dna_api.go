@@ -623,19 +623,19 @@ type DynamicArgs []*DynamicArg
 
 type DynamicArg struct {
 	Index int    `json:"index"`
-	Type  string `json:"type"`
+	Format  string `json:"format"`
 	Value string `json:"value"`
 }
 
 type ReadonlyCallContractArgs struct {
-	Contract  common.Address `json:"contract"`
-	Method    string         `json:"method"`
-	ConvertTo string         `json:"convertTo"`
-	Args      DynamicArgs    `json:"args"`
+	Contract common.Address `json:"contract"`
+	Method   string         `json:"method"`
+	Format   string         `json:"format"`
+	Args     DynamicArgs    `json:"args"`
 }
 
 func (a DynamicArg) ToBytes() []byte {
-	switch a.Type {
+	switch a.Format {
 	case "byte":
 		i, err := strconv.ParseInt(a.Value, 10, 8)
 		if err != nil {
@@ -667,7 +667,11 @@ func (a DynamicArg) ToBytes() []byte {
 		}
 		return blockchain.ConvertToInt(d).Bytes()
 	default:
-		return nil
+		data, err := hexutil.Decode(a.Value)
+		if err != nil {
+			return nil
+		}
+		return data
 	}
 }
 
@@ -827,12 +831,12 @@ func (api *DnaApi) TerminateContract(ctx context.Context, args TerminateContract
 	return api.baseApi.sendInternalTx(ctx, tx)
 }
 
-func (api *DnaApi) ReadContractData(contract common.Address, key string, convertTo string) (interface{}, error) {
+func (api *DnaApi) ReadContractData(contract common.Address, key string, format string) (interface{}, error) {
 	data := api.baseApi.getAppState().State.GetContractValue(contract, []byte(key))
 	if data == nil {
 		return nil, errors.New("data is nil")
 	}
-	return conversion(convertTo, data)
+	return conversion(format, data)
 }
 
 func (api *DnaApi) ReadonlyCallContract(args ReadonlyCallContractArgs) (interface{}, error) {
@@ -841,7 +845,7 @@ func (api *DnaApi) ReadonlyCallContract(args ReadonlyCallContractArgs) (interfac
 	if err != nil {
 		return nil, err
 	}
-	return conversion(args.ConvertTo, data)
+	return conversion(args.Format, data)
 }
 
 func (api *DnaApi) GetContractData(contract common.Address) interface{} {
@@ -868,8 +872,6 @@ func conversion(convertTo string, data []byte) (interface{}, error) {
 		v := new(big.Int)
 		v.SetBytes(data)
 		return v.String(), nil
-	case "array":
-		return fmt.Sprintf("%v", data), nil
 	case "hex":
 		return hexutil.Encode(data), nil
 	case "dna":
@@ -877,6 +879,6 @@ func conversion(convertTo string, data []byte) (interface{}, error) {
 		v.SetBytes(data)
 		return blockchain.ConvertToFloat(v), nil
 	default:
-		return data, nil
+		return hexutil.Encode(data), nil
 	}
 }
